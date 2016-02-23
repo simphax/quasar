@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"math"
 	"sort"
 
 	"github.com/scakemyer/quasar/config"
@@ -83,6 +82,7 @@ func Resolution720p480p(t *bittorrent.Torrent) int {
 }
 
 func QualityFactor(t *bittorrent.Torrent) float64 {
+	/*
 	result := float64(t.Seeds)
 	if t.Resolution > bittorrent.ResolutionUnknown {
 		result *= math.Pow(float64(t.Resolution), 3)
@@ -91,4 +91,32 @@ func QualityFactor(t *bittorrent.Torrent) float64 {
 		result *= float64(t.RipType)
 	}
 	return result
+	*/
+
+	surroundSound := t.AudioCodec == bittorrent.CodecAC3 || t.AudioCodec == bittorrent.CodecDTS || t.AudioCodec == bittorrent.CodecDTSHD || t.AudioCodec == bittorrent.CodecDTSHDMA
+	qualityRip := (t.RipType == bittorrent.RipBluRay || t.RipType == bittorrent.RipWeb || t.RipType == bittorrent.RipHDTV)
+
+	if t.Seeds > 10 {
+		if t.Resolution == bittorrent.Resolution1080p && surroundSound {
+			return 50000.0 + float64(t.Seeds)
+		} else if t.Resolution == bittorrent.Resolution720p && surroundSound {
+			return 40000.0 + float64(t.Seeds)
+		} else if t.Resolution == bittorrent.Resolution1080p {
+			return 30000.0 + float64(t.Seeds)
+		} else if t.Resolution == bittorrent.Resolution720p {
+			return 20000.0 + float64(t.Seeds)
+		} else if qualityRip && surroundSound {
+			return 10000.0 + float64(t.Seeds)
+		} else if qualityRip {
+			return 9900.0 + float64(t.Seeds)
+		} else {
+			return float64(t.Seeds)
+		}
+	} else {
+		if t.Resolution > bittorrent.ResolutionUnknown {
+			return float64(t.Resolution) + float64(t.Seeds)
+		} else {
+			return float64(t.Seeds)
+		}
+	}
 }

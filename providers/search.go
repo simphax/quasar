@@ -229,6 +229,8 @@ func processLinks(torrentsChan chan *bittorrent.Torrent, sortType int) []*bittor
 
 	if sortMode == SortBySeeders {
 		sort.Sort(sort.Reverse(BySeeds(torrents)))
+	} else if sortMode == SortBalanced {
+		sort.Sort(sort.Reverse(ByQuality(torrents)))
 	} else {
 		switch resolutionPreference {
 		case Sort1080p720p480p:
