@@ -183,7 +183,7 @@ push:
 	done
 
 test:
-	killall -SIGINT Kodi
+	killall -SIGINT Kodi &
 	sleep 6
 	cp build/darwin_x64/quasar /Users/Simon/Library/Application\ Support/Kodi/userdata/addon_data/plugin.video.quasar/bin/darwin_x64/quasar
 	cp build/darwin_x64/quasar /Users/Simon/Library/Application\ Support/Kodi/addons/plugin.video.quasar/resources/bin/darwin_x64/quasar
