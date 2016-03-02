@@ -176,15 +176,8 @@ pull-all:
 	done
 
 pull:
-<<<<<<< HEAD
 	docker pull quasarhq/libtorrent-go:$(PLATFORM)
 	docker tag quasarhq/libtorrent-go:$(PLATFORM) libtorrent-go:$(PLATFORM)
-
-push:
-	for i in $(PLATFORMS); do \
-	  docker tag quasar:$$i quasarhq/quasar:$$i; \
-	  docker push quasarhq/quasar:$$i; \
-	done
 
 test:
 	killall -SIGINT Kodi &
@@ -192,7 +185,3 @@ test:
 	cp build/darwin_x64/quasar /Users/Simon/Library/Application\ Support/Kodi/userdata/addon_data/plugin.video.quasar/bin/darwin_x64/quasar
 	cp build/darwin_x64/quasar /Users/Simon/Library/Application\ Support/Kodi/addons/plugin.video.quasar/resources/bin/darwin_x64/quasar
 	open /Applications/Kodi.app
-=======
-	docker pull $(PROJECT)/libtorrent-go:$(PLATFORM)
-	docker tag $(PROJECT)/libtorrent-go:$(PLATFORM) libtorrent-go:$(PLATFORM)
->>>>>>> scakemyer/master
