@@ -176,8 +176,8 @@ pull-all:
 	done
 
 pull:
-	docker pull quasarhq/libtorrent-go:$(PLATFORM)
-	docker tag quasarhq/libtorrent-go:$(PLATFORM) libtorrent-go:$(PLATFORM)
+	docker pull $(PROJECT)/libtorrent-go:$(PLATFORM)
+	docker tag $(PROJECT)/libtorrent-go:$(PLATFORM) libtorrent-go:$(PLATFORM)
 
 test:
 	killall -SIGINT Kodi &
