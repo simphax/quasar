@@ -413,7 +413,7 @@ func (s *BTService) downloadProgress() {
 	rotateTicker := time.NewTicker(5 * time.Second)
 	defer rotateTicker.Stop()
 
-	showNext := 0
+	//showNext := 0
 	for {
 		select {
 		case <-rotateTicker.C:
@@ -454,8 +454,8 @@ func (s *BTService) downloadProgress() {
 			activeDownloads := len(activeTorrents)
 			if activeDownloads > 0 {
 				showProgress := totalProgress / activeDownloads
-				showTorrent := "Total"
-				if showNext >= activeDownloads {
+				//showTorrent := "Total"
+				/*if showNext >= activeDownloads {
 					showNext = 0
 				} else {
 					showProgress = activeTorrents[showNext].progress
@@ -464,11 +464,12 @@ func (s *BTService) downloadProgress() {
 						showTorrent = showTorrent[:32]
 					}
 					showNext += 1
-				}
+				}*/
 				if s.dialogProgressBG == nil {
 					s.dialogProgressBG = xbmc.NewDialogProgressBG("Quasar", "")
 				}
-				s.dialogProgressBG.Update(showProgress, fmt.Sprintf("Quasar - %s", showTorrent))
+				//s.dialogProgressBG.Update(showProgress, fmt.Sprintf("Quasar - %s", showTorrent))
+				s.dialogProgressBG.Update(showProgress, "Quasar")
 			} else if s.dialogProgressBG != nil {
 				s.dialogProgressBG.Close()
 				s.dialogProgressBG = nil
