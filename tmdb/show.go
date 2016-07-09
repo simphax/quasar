@@ -5,10 +5,11 @@ import (
 	"path"
 	"sync"
 	"time"
-	"errors"
 	"strconv"
 	"strings"
 	"math/rand"
+	"encoding/json"
+	"runtime"
 
 	"github.com/jmcvetta/napping"
 	"github.com/scakemyer/quasar/cache"
@@ -16,13 +17,20 @@ import (
 	"github.com/scakemyer/quasar/xbmc"
 )
 
+func LogError(err error) {
+	if err != nil {
+		pc, fn, line, _ := runtime.Caller(1)
+		log.Errorf("in %s[%s:%d] %#v: %v)", runtime.FuncForPC(pc).Name(), fn, line, err, err)
+	}
+}
+
 func GetShow(showId int, language string) *Show {
 	var show *Show
 	cacheStore := cache.NewFileStore(path.Join(config.Get().ProfilePath, "cache"))
 	key := fmt.Sprintf("com.tmdb.show.%d.%s", showId, language)
 	if err := cacheStore.Get(key, &show); err != nil {
 		rateLimiter.Call(func() {
-      urlValues := napping.Params{
+			urlValues := napping.Params{
 				"api_key": apiKey,
 				"append_to_response": "credits,images,alternative_titles,translations,external_ids",
 				"language": language,
@@ -34,10 +42,20 @@ func GetShow(showId int, language string) *Show {
 				nil,
 			)
 			if err != nil {
-				panic(err)
-			}
-			if resp.Status() != 200 {
-				panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+				switch e := err.(type) {
+					case *json.UnmarshalTypeError:
+						log.Errorf("UnmarshalTypeError: Value[%s] Type[%v] Offset[%d] for %d", e.Value, e.Type, e.Offset, showId)
+					case *json.InvalidUnmarshalError:
+						log.Errorf("InvalidUnmarshalError: Type[%v]", e.Type)
+					default:
+						log.Error(err.Error())
+				}
+				LogError(err)
+				xbmc.Notify("Quasar", "GetShow failed, check your logs.", config.AddonIcon())
+			} else if resp.Status() != 200 {
+				message := fmt.Sprintf("GetShow bad status: %d", resp.Status())
+				log.Error(message)
+				xbmc.Notify("Quasar", message, config.AddonIcon())
 			}
 		})
 		if show != nil {
@@ -72,12 +90,13 @@ func GetShows(showIds []int, language string) Shows {
 	return shows
 }
 
-func SearchShows(query string, language string) Shows {
+func SearchShows(query string, language string, page int) Shows {
 	var results EntityList
 	rateLimiter.Call(func() {
 		urlValues := napping.Params{
 			"api_key": apiKey,
 			"query": query,
+			"page": strconv.Itoa(startPage + page),
 		}.AsUrlValues()
 		resp, err := napping.Get(
 			tmdbEndpoint + "search/tv",
@@ -86,10 +105,12 @@ func SearchShows(query string, language string) Shows {
 			nil,
 		)
 		if err != nil {
-			panic(err)
-		}
-		if resp.Status() != 200 {
-			panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+			log.Error(err.Error())
+			xbmc.Notify("Quasar", "SearchShows failed, check your logs.", config.AddonIcon())
+		} else if resp.Status() != 200 {
+			message := fmt.Sprintf("SearchShows bad status: %d", resp.Status())
+			log.Error(message)
+			xbmc.Notify("Quasar", message, config.AddonIcon())
 		}
 	})
 	tmdbIds := make([]int, 0, len(results.Results))
@@ -99,58 +120,38 @@ func SearchShows(query string, language string) Shows {
 	return GetShows(tmdbIds, language)
 }
 
-func ListShowsComplete(endpoint string, params napping.Params, page int) Shows {
-	MaxPages := popularMoviesMaxPages
-	if page >= 0 {
-		MaxPages = 1
-	}
-	shows := make(Shows, MaxPages * moviesPerPage)
+func ListShows(endpoint string, params napping.Params, page int) (shows Shows) {
+	var results *EntityList
 
+	params["page"] = strconv.Itoa(startPage + page)
 	params["api_key"] = apiKey
+	p := params.AsUrlValues()
 
-	wg := sync.WaitGroup{}
-	for i := 0; i < MaxPages; i++ {
-		wg.Add(1)
-		currentpage := i
-		startMoviesIndex := i * moviesPerPage
-		if page >= 0 {
-			currentpage = page
+	rateLimiter.Call(func() {
+		resp, err := napping.Get(
+			tmdbEndpoint + endpoint,
+			&p,
+			&results,
+			nil,
+		)
+		if err != nil {
+			log.Error(err.Error())
+			xbmc.Notify("Quasar", "ListShows failed, check your logs.", config.AddonIcon())
+		} else if resp.Status() != 200 {
+			message := fmt.Sprintf("ListShows bad status: %d", resp.Status())
+			log.Error(message)
+			xbmc.Notify("Quasar", message, config.AddonIcon())
 		}
-		go func(page int) {
-			defer wg.Done()
-			var tmp *EntityList
-			tmpParams := napping.Params{
-				"page": strconv.Itoa(popularMoviesStartPage + page),
-			}
-			for k, v := range params {
-				tmpParams[k] = v
-			}
-      urlValues := tmpParams.AsUrlValues()
-			rateLimiter.Call(func() {
-				resp, err := napping.Get(
-					tmdbEndpoint + endpoint,
-					&urlValues,
-					&tmp,
-					nil,
-				)
-				if err != nil {
-					panic(err)
-				}
-				if resp.Status() != 200 {
-					panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
-				}
-			})
-			for i, entity := range tmp.Results {
-				shows[startMoviesIndex + i] = GetShow(entity.Id, params["language"])
-			}
-		}(currentpage)
+	})
+	if results != nil {
+		for _, show := range results.Results {
+			shows = append(shows, GetShow(show.Id, params["language"]))
+		}
 	}
-	wg.Wait()
-
 	return shows
 }
 
-func PopularShowsComplete(genre string, language string, page int) Shows {
+func PopularShows(genre string, language string, page int) Shows {
 	var p napping.Params
 	if genre == "" {
 		p = napping.Params{
@@ -166,10 +167,10 @@ func PopularShowsComplete(genre string, language string, page int) Shows {
 			"with_genres":        genre,
 		}
 	}
-	return ListShowsComplete("discover/tv", p, page)
+	return ListShows("discover/tv", p, page)
 }
 
-func RecentShowsComplete(genre string, language string, page int) Shows {
+func RecentShows(genre string, language string, page int) Shows {
 	var p napping.Params
 	if genre == "" {
 		p = napping.Params{
@@ -185,10 +186,10 @@ func RecentShowsComplete(genre string, language string, page int) Shows {
 			"with_genres":        genre,
 		}
 	}
-	return ListShowsComplete("discover/tv", p, page)
+	return ListShows("discover/tv", p, page)
 }
 
-func RecentEpisodesComplete(genre string, language string, page int) Shows {
+func RecentEpisodes(genre string, language string, page int) Shows {
 	var p napping.Params
 
 	if genre == "" {
@@ -205,15 +206,15 @@ func RecentEpisodesComplete(genre string, language string, page int) Shows {
 			"with_genres":        genre,
 		}
 	}
-	return ListShowsComplete("discover/tv", p, page)
+	return ListShows("discover/tv", p, page)
 }
 
-func TopRatedShowsComplete(genre string, language string, page int) Shows {
-	return ListShowsComplete("tv/top_rated", napping.Params{"language": language}, page)
+func TopRatedShows(genre string, language string, page int) Shows {
+	return ListShows("tv/top_rated", napping.Params{"language": language}, page)
 }
 
-func MostVotedShowsComplete(genre string, language string, page int) Movies {
-	return ListMoviesComplete("discover/tv", napping.Params{
+func MostVotedShows(genre string, language string, page int) Shows {
+	return ListShows("discover/tv", napping.Params{
 		"language":           language,
 		"sort_by":            "vote_count.desc",
 		"first_air_date.lte": time.Now().UTC().Format("2006-01-02"),
@@ -224,7 +225,7 @@ func MostVotedShowsComplete(genre string, language string, page int) Movies {
 func GetTVGenres(language string) []*Genre {
 	genres := GenreList{}
 	rateLimiter.Call(func() {
-    urlValues := napping.Params{
+		urlValues := napping.Params{
 			"api_key": apiKey,
 			"language": language,
 		}.AsUrlValues()
@@ -235,10 +236,12 @@ func GetTVGenres(language string) []*Genre {
 			nil,
 		)
 		if err != nil {
-			panic(err)
-		}
-		if resp.Status() != 200 {
-			panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+			log.Error(err.Error())
+			xbmc.Notify("Quasar", "GetTVGenres failed, check your logs.", config.AddonIcon())
+		} else if resp.Status() != 200 {
+			message := fmt.Sprintf("GetTVGenres bad status: %d", resp.Status())
+			log.Error(message)
+			xbmc.Notify("Quasar", message, config.AddonIcon())
 		}
 	})
 	return genres.Genres

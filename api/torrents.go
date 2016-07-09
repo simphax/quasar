@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"fmt"
+	"time"
 	"errors"
 	"strconv"
 	"encoding/hex"
@@ -17,6 +18,41 @@ import (
 )
 
 var torrentsLog = logging.MustGetLogger("torrents")
+
+type TorrentMap struct {
+	tmdbId  string
+	torrent *bittorrent.Torrent
+}
+var TorrentsMap []*TorrentMap
+
+func AddToTorrentsMap(tmdbId string, torrent *bittorrent.Torrent) {
+	inTorrentsMap := false
+	for _, torrentMap := range TorrentsMap {
+		if tmdbId == torrentMap.tmdbId {
+			inTorrentsMap = true
+		}
+	}
+	if inTorrentsMap == false {
+		torrentMap := &TorrentMap{
+			tmdbId: tmdbId,
+			torrent: torrent,
+		}
+		TorrentsMap = append(TorrentsMap, torrentMap)
+	}
+}
+
+func InTorrentsMap(tmdbId string) (torrents []*bittorrent.Torrent) {
+	for index, torrentMap := range TorrentsMap {
+		if tmdbId == torrentMap.tmdbId {
+			if xbmc.DialogConfirm("Quasar", "LOCALIZE[30260]") {
+				torrents = append(torrents, torrentMap.torrent)
+			} else {
+				TorrentsMap = append(TorrentsMap[:index], TorrentsMap[index + 1:]...)
+			}
+		}
+	}
+	return torrents
+}
 
 func ListTorrents(btService *bittorrent.BTService) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
@@ -39,13 +75,37 @@ func ListTorrents(btService *bittorrent.BTService) gin.HandlerFunc {
 			playUrl := UrlQuery(UrlForXBMC("/play"), "resume", fmt.Sprintf("%d", i))
 
 			status := bittorrent.StatusStrings[int(torrentStatus.GetState())]
-			if torrentStatus.GetPaused() || btService.Session.IsPaused() {
-				status = "Paused"
+
+			ratio := float64(0)
+			allTimeDownload := float64(torrentStatus.GetAllTimeDownload())
+			if allTimeDownload > 0 {
+				ratio = float64(torrentStatus.GetAllTimeUpload()) / allTimeDownload
 			}
-			torrentsLog.Info(fmt.Sprintf("- %s - %s", status, torrentName))
+
+			timeRatio := float64(0)
+			finished_time := float64(torrentStatus.GetFinishedTime())
+			download_time := float64(torrentStatus.GetActiveTime()) - finished_time
+			if download_time > 1 {
+				timeRatio = finished_time / download_time
+			}
+
+			seedingTime := time.Duration(torrentStatus.GetSeedingTime()) * time.Second
+
+			torrentAction := []string{"LOCALIZE[30231]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/pause/%d", i))}
+			sessionAction := []string{"LOCALIZE[30233]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/pause"))}
+
+			if torrentStatus.GetPaused() {
+				status = "Paused"
+				torrentAction = []string{"LOCALIZE[30235]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/resume/%d", i))}
+			}
+			if btService.Session.IsPaused() {
+				status = "Paused"
+				sessionAction = []string{"LOCALIZE[30234]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/resume"))}
+			}
+			torrentsLog.Infof("- %.2f%% - %s - %.2f:1 / %.2f:1 (%s) - %s", progress, status, ratio, timeRatio, seedingTime.String(), torrentName)
 
 			item := xbmc.ListItem{
-				Label: fmt.Sprintf("%.2f%% - %s - %s", progress, status, torrentName),
+				Label: fmt.Sprintf("%.2f%% - %s - %.2f:1 / %.2f:1 (%s) - %s", progress, status, ratio, timeRatio, seedingTime.String(), torrentName),
 				Path: playUrl,
 				Info: &xbmc.ListItemInfo{
 					Title: torrentName,
@@ -53,11 +113,9 @@ func ListTorrents(btService *bittorrent.BTService) gin.HandlerFunc {
 			}
 			item.ContextMenu = [][]string{
 				[]string{"LOCALIZE[30230]", fmt.Sprintf("XBMC.PlayMedia(%s)", playUrl)},
-				[]string{"LOCALIZE[30235]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/resume/%d", i))},
-				[]string{"LOCALIZE[30231]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/pause/%d", i))},
+				torrentAction,
 				[]string{"LOCALIZE[30232]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/delete/%d", i))},
-				[]string{"LOCALIZE[30233]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/pause"))},
-				[]string{"LOCALIZE[30234]", fmt.Sprintf("XBMC.RunPlugin(%s)", UrlForXBMC("/torrents/resume"))},
+				sessionAction,
 			}
 			item.IsPlayable = true
 			items = append(items, &item)

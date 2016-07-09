@@ -8,6 +8,7 @@ import (
 	"math/rand"
 
 	"github.com/jmcvetta/napping"
+	"github.com/scakemyer/quasar/config"
 	"github.com/scakemyer/quasar/xbmc"
 )
 
@@ -21,19 +22,20 @@ func GetMovie(Id string) (movie *Movie) {
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
+		log.Error(err.Error())
+		xbmc.Notify("Quasar", "GetMovie failed, check your logs.", config.AddonIcon())
 	}
 
 	resp.Unmarshal(&movie)
 	return movie
 }
 
-func SearchMovies(query string, page string) (movies []*Movies) {
+func SearchMovies(query string, page string) (movies []*Movies, err error) {
 	endPoint := "search"
 
 	params := napping.Params{
 		"page": page,
-		"limit": Limit,
+		"limit": strconv.Itoa(config.Get().ResultsPerPage),
 		"query": query,
 		"extended": "full,images",
 	}.AsUrlValues()
@@ -41,10 +43,9 @@ func SearchMovies(query string, page string) (movies []*Movies) {
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
-	}
-	if resp.Status() != 200 {
-		panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+		return movies, err
+	} else if resp.Status() != 200 {
+		return movies, errors.New(fmt.Sprintf("SearchMovies bad status: %d", resp.Status()))
 	}
 
   // TODO use response headers for pagination limits:
@@ -52,25 +53,24 @@ func SearchMovies(query string, page string) (movies []*Movies) {
   // X-Pagination-Item-Count:100
 
 	resp.Unmarshal(&movies)
-	return movies
+	return movies, err
 }
 
-func TopMovies(topCategory string, page string) (movies []*Movies) {
+func TopMovies(topCategory string, page string) (movies []*Movies, err error) {
 	endPoint := "movies/" + topCategory
 
 	params := napping.Params{
 		"page": page,
-		"limit": Limit,
+		"limit": strconv.Itoa(config.Get().ResultsPerPage),
 		"extended": "full,images",
 	}.AsUrlValues()
 
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
-	}
-	if resp.Status() != 200 {
-		panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+		return movies, err
+	} else if resp.Status() != 200 {
+		return movies, errors.New(fmt.Sprintf("TopMovies bad status: %d", resp.Status()))
 	}
 
 	if topCategory == "popular" {
@@ -88,7 +88,75 @@ func TopMovies(topCategory string, page string) (movies []*Movies) {
 	} else {
 		resp.Unmarshal(&movies)
 	}
-	return movies
+	return movies, err
+}
+
+func WatchlistMovies() (movies []*Movies, err error) {
+	if err := Authorized(); err != nil {
+		return movies, err
+	}
+
+	endPoint := "sync/watchlist/movies"
+
+	params := napping.Params{
+		"extended": "full,images",
+	}.AsUrlValues()
+
+	resp, err := GetWithAuth(endPoint, params)
+
+	if err != nil {
+		return movies, err
+	} else if resp.Status() != 200 {
+		return movies, errors.New(fmt.Sprintf("WatchlistMovies bad status: %d", resp.Status()))
+	}
+
+	var watchlist []*WatchlistMovie
+	resp.Unmarshal(&watchlist)
+
+	movieListing := make([]*Movies, 0)
+	for _, movie := range watchlist {
+		movieItem := Movies{
+			Movie: movie.Movie,
+		}
+		movieListing = append(movieListing, &movieItem)
+	}
+	movies = movieListing
+
+	return movies, err
+}
+
+func CollectionMovies() (movies []*Movies, err error) {
+	if err := Authorized(); err != nil {
+		return movies, err
+	}
+
+	endPoint := "sync/collection/movies"
+
+	params := napping.Params{
+		"extended": "full,images",
+	}.AsUrlValues()
+
+	resp, err := GetWithAuth(endPoint, params)
+
+	if err != nil {
+		return movies, err
+	} else if resp.Status() != 200 {
+		return movies, errors.New(fmt.Sprintf("CollectionMovies bad status: %d", resp.Status()))
+	}
+
+	var collection []*CollectionMovie
+	resp.Unmarshal(&collection)
+
+	movieListing := make([]*Movies, 0)
+	for _, movie := range collection {
+		movieItem := Movies{
+			Movie: movie.Movie,
+		}
+		movieListing = append(movieListing, &movieItem)
+	}
+	movies = movieListing
+
+	return movies, err
 }
 
 func (movie *Movie) ToListItem() *xbmc.ListItem {

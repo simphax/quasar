@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 	"path"
-	"errors"
 	"strconv"
 	"math/rand"
 
@@ -14,10 +13,17 @@ import (
 	"github.com/scakemyer/quasar/cache"
 	"github.com/scakemyer/quasar/config"
 	"github.com/scakemyer/quasar/util"
+	"github.com/scakemyer/quasar/xbmc"
+)
+
+const (
+	MaxPages  = 20
+	startPage = 1
+	resultsPerPage = 20
 )
 
 var (
-	tmdbLog = logging.MustGetLogger("tmdb")
+	log = logging.MustGetLogger("tmdb")
 )
 
 type Movies []*Movie
@@ -52,6 +58,8 @@ type Movie struct {
 
 	Credits *Credits `json:"credits,omitempty"`
 	Images  *Images  `json:"images,omitempty"`
+
+	ReleaseDates *ReleaseDatesResults `json:"release_dates"`
 }
 
 type Show struct {
@@ -69,7 +77,6 @@ type Show struct {
 	OriginalName        string       `json:"original_name"`
 	OriginCountry       []string     `json:"origin_country"`
 	Overview            string       `json:"overview"`
-	EpisodeRuntime      []int        `json:"runtime"`
 	RawPopularity       interface{}  `json:"popularity"`
 	Popularity          float64      `json:"-"`
 	ProductionCompanies []*IdName    `json:"production_companies"`
@@ -177,11 +184,10 @@ type Credits struct {
 }
 
 type ExternalIDs struct {
-	IMDBId      string `json:"imdb_id"`
-	FreeBaseID  string `json:"freebase_id"`
-	FreeBaseMID string `json:"freebase_mid"`
-	TVDBID      int    `json:"tvdb_id"`
-	TVRageID    int    `json:"tvrage_id"`
+	IMDBId      string      `json:"imdb_id"`
+	FreeBaseID  string      `json:"freebase_id"`
+	FreeBaseMID string      `json:"freebase_mid"`
+	TVDBID      interface{} `json:"tvdb_id"`
 }
 
 type AlternativeTitle struct {
@@ -222,6 +228,23 @@ type Trailer struct {
 	Type   string `json:"type"`
 }
 
+type ReleaseDatesResults struct {
+	Results []*ReleaseDates `json:"results"`
+}
+
+type ReleaseDates struct {
+	ISO_3166_1   string         `json:"iso_3166_1"`
+	ReleaseDates []*ReleaseDate `json:"release_dates"`
+}
+
+type ReleaseDate struct {
+	Certification string `json:"certification"`
+	ISO_639_1     string `json:"iso_639_1"`
+	Note          string `json:"note"`
+	ReleaseDate   string `json:"release_date"`
+	Type          int    `json:"type"`
+}
+
 const (
 	tmdbEndpoint            = "http://api.themoviedb.org/3/"
 	imageEndpoint           = "http://image.tmdb.org/t/p/"
@@ -242,7 +265,7 @@ var (
 var rateLimiter = util.NewRateLimiter(burstRate, burstTime, simultaneousConnections)
 
 func CheckApiKey() {
-	tmdbLog.Info("Checking TMDB API key...")
+	log.Info("Checking TMDB API key...")
 
 	customApiKey := config.Get().TMDBApiKey
 	if customApiKey != "" {
@@ -254,18 +277,23 @@ func CheckApiKey() {
 	for index := len(apiKeys) - 1; index >= 0; index-- {
 		result = tmdbCheck(apiKey)
 		if result {
-			tmdbLog.Noticef("TMDB API key check passed, using %s...", apiKey[:7])
+			log.Noticef("TMDB API key check passed, using %s...", apiKey[:7])
 			break
 		} else {
-			tmdbLog.Warningf("TMDB API key failed: %s", apiKey)
+			log.Warningf("TMDB API key failed: %s", apiKey)
 			if apiKey == apiKeys[index] {
 				apiKeys = append(apiKeys[:index], apiKeys[index + 1:]...)
 			}
-			apiKey = apiKeys[rand.Intn(len(apiKeys))]
+			if len(apiKeys) > 0 {
+				apiKey = apiKeys[rand.Intn(len(apiKeys))]
+			} else {
+				result = false
+				break
+			}
 		}
 	}
 	if result == false {
-		tmdbLog.Error("No valid TMDB API key found")
+		log.Error("No valid TMDB API key found")
 	}
 }
 
@@ -284,9 +312,10 @@ func tmdbCheck(key string) bool {
 	)
 
 	if err != nil {
-		panic(err)
-	}
-	if resp.Status() != 200 {
+		log.Error(err.Error())
+		xbmc.Notify("Quasar", "TMDB check failed, check your logs.", config.AddonIcon())
+		return false
+	} else if resp.Status() != 200 {
 		return false
 	}
 
@@ -299,17 +328,17 @@ func ImageURL(uri string, size string) string {
 
 func ListEntities(endpoint string, params napping.Params) []*Entity {
 	var wg sync.WaitGroup
-	entities := make([]*Entity, popularMoviesMaxPages * moviesPerPage)
+	entities := make([]*Entity, MaxPages * resultsPerPage)
 	params["api_key"] = apiKey
 	params["language"] = "en"
 
-	wg.Add(popularMoviesMaxPages)
-	for i := 0; i < popularMoviesMaxPages; i++ {
+	wg.Add(MaxPages)
+	for i := 0; i < MaxPages; i++ {
 		go func(page int) {
 			defer wg.Done()
 			var tmp *EntityList
 			tmpParams := napping.Params{
-				"page": strconv.Itoa(popularMoviesStartPage + page),
+				"page": strconv.Itoa(startPage + page),
 			}
 			for k, v := range params {
 				tmpParams[k] = v
@@ -323,14 +352,16 @@ func ListEntities(endpoint string, params napping.Params) []*Entity {
 					nil,
 				)
 				if err != nil {
-					panic(err)
-				}
-				if resp.Status() != 200 {
-					panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+					log.Error(err.Error())
+					xbmc.Notify("Quasar", "ListEntities failed, check your logs.", config.AddonIcon())
+				} else if resp.Status() != 200 {
+					message := fmt.Sprintf("ListEntities bad status: %d", resp.Status())
+					log.Error(message)
+					xbmc.Notify("Quasar", message, config.AddonIcon())
 				}
 			})
 			for i, entity := range tmp.Results {
-				entities[page * moviesPerPage + i] = entity
+				entities[page * resultsPerPage + i] = entity
 			}
 		}(i)
 	}
@@ -357,10 +388,12 @@ func Find(externalId string, externalSource string) *FindResult {
 				nil,
 			)
 			if err != nil {
-				panic(err)
-			}
-			if resp.Status() != 200 {
-				panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+				log.Error(err.Error())
+				xbmc.Notify("Quasar", "Failed Find call, check your logs.", config.AddonIcon())
+			} else if resp.Status() != 200 {
+				message := fmt.Sprintf("Find call bad status: %d", resp.Status())
+				log.Error(message)
+				xbmc.Notify("Quasar", message, config.AddonIcon())
 			}
 			cacheStore.Set(key, result, 365 * 24 * time.Hour)
 		})

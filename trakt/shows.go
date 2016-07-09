@@ -8,6 +8,7 @@ import (
 	"math/rand"
 
 	"github.com/jmcvetta/napping"
+	"github.com/scakemyer/quasar/config"
 	"github.com/scakemyer/quasar/xbmc"
 )
 
@@ -21,19 +22,20 @@ func GetShow(Id string) (show *Show) {
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
+		log.Error(err.Error())
+		xbmc.Notify("Quasar", "GetShow failed, check your logs.", config.AddonIcon())
 	}
 
 	resp.Unmarshal(&show)
 	return show
 }
 
-func SearchShows(query string, page string) (shows []*Shows) {
+func SearchShows(query string, page string) (shows []*Shows, err error) {
 	endPoint := "search"
 
 	params := napping.Params{
 		"page": page,
-		"limit": Limit,
+		"limit": strconv.Itoa(config.Get().ResultsPerPage),
 		"query": query,
 		"extended": "full,images",
 	}.AsUrlValues()
@@ -41,32 +43,30 @@ func SearchShows(query string, page string) (shows []*Shows) {
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
-	}
-	if resp.Status() != 200 {
-		panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+		return shows, err
+	} else if resp.Status() != 200 {
+		return shows, errors.New(fmt.Sprintf("SearchShows bad status: %d", resp.Status()))
 	}
 
 	resp.Unmarshal(&shows)
-	return shows
+	return shows, err
 }
 
-func TopShows(topCategory string, page string) (shows []*Shows) {
+func TopShows(topCategory string, page string) (shows []*Shows, err error) {
 	endPoint := "shows/" + topCategory
 
 	params := napping.Params{
 		"page": page,
-		"limit": Limit,
+		"limit": strconv.Itoa(config.Get().ResultsPerPage),
 		"extended": "full,images",
 	}.AsUrlValues()
 
 	resp, err := Get(endPoint, params)
 
 	if err != nil {
-		panic(err)
-	}
-	if resp.Status() != 200 {
-		panic(errors.New(fmt.Sprintf("Bad status: %d", resp.Status())))
+		return shows, err
+	} else if resp.Status() != 200 {
+		return shows, errors.New(fmt.Sprintf("TopShows bad status: %d", resp.Status()))
 	}
 
   if topCategory == "popular" {
@@ -84,7 +84,75 @@ func TopShows(topCategory string, page string) (shows []*Shows) {
   } else {
   	resp.Unmarshal(&shows)
   }
-	return shows
+	return shows, err
+}
+
+func WatchlistShows() (shows []*Shows, err error) {
+	if err := Authorized(); err != nil {
+		return shows, err
+	}
+
+	endPoint := "sync/watchlist/shows"
+
+	params := napping.Params{
+		"extended": "full,images",
+	}.AsUrlValues()
+
+	resp, err := GetWithAuth(endPoint, params)
+
+	if err != nil {
+		return shows, err
+	} else if resp.Status() != 200 {
+		return shows, errors.New(fmt.Sprintf("WatchlistShows bad status: %d", resp.Status()))
+	}
+
+	var watchlist []*WatchlistShow
+	resp.Unmarshal(&watchlist)
+
+	showListing := make([]*Shows, 0)
+	for _, show := range watchlist {
+		showItem := Shows{
+			Show: show.Show,
+		}
+		showListing = append(showListing, &showItem)
+	}
+	shows = showListing
+
+	return shows, err
+}
+
+func CollectionShows() (shows []*Shows, err error) {
+	if err := Authorized(); err != nil {
+		return shows, err
+	}
+
+	endPoint := "sync/collection/shows"
+
+	params := napping.Params{
+		"extended": "full,images",
+	}.AsUrlValues()
+
+	resp, err := GetWithAuth(endPoint, params)
+
+	if err != nil {
+		return shows, err
+	} else if resp.Status() != 200 {
+		return shows, errors.New(fmt.Sprintf("CollectionShows bad status: %d", resp.Status()))
+	}
+
+	var collection []*WatchlistShow
+	resp.Unmarshal(&collection)
+
+	showListing := make([]*Shows, 0)
+	for _, show := range collection {
+		showItem := Shows{
+			Show: show.Show,
+		}
+		showListing = append(showListing, &showItem)
+	}
+	shows = showListing
+
+	return shows, err
 }
 
 func (show *Show) ToListItem() *xbmc.ListItem {

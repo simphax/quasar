@@ -22,19 +22,29 @@ type Configuration struct {
 	ProfilePath         string
 	BackgroundHandling  bool
 	KeepFilesAfterStop  bool
-	EnablePagination    bool
+	ResultsPerPage      int
 	EnableOverlayStatus bool
 	ChooseStreamAuto    bool
 	UseOriginalTitle    bool
+	AddSpecials         bool
 	PreReleaseUpdates   bool
 	BufferSize          int
 	UploadRateLimit     int
 	DownloadRateLimit   int
 	LimitAfterBuffering bool
+	ShareRatioLimit     int
+	SeedTimeRatioLimit  int
+	SeedTimeLimit       int
+	DisableDHT          bool
 	BTListenPortMin     int
 	BTListenPortMax     int
 	ConnectionsLimit    int
 	SessionSave         int
+	Scrobble            bool
+	TraktUsername       string
+	TraktToken          string
+	TraktRefreshToken   string
+	CloudHoleKey        string
 	TMDBApiKey          string
 
 	SortingModeMovies            int
@@ -103,15 +113,25 @@ func Reload() *Configuration {
 		LimitAfterBuffering: xbmc.GetSettingBool("limit_after_buffering"),
 		BackgroundHandling:  xbmc.GetSettingBool("background_handling"),
 		KeepFilesAfterStop:  xbmc.GetSettingBool("keep_files"),
-		EnablePagination:    xbmc.GetSettingBool("enable_pagination"),
+		ResultsPerPage:      xbmc.GetSettingInt("results_per_page"),
 		EnableOverlayStatus: xbmc.GetSettingBool("enable_overlay_status"),
 		ChooseStreamAuto:    xbmc.GetSettingBool("choose_stream_auto"),
 		UseOriginalTitle:    xbmc.GetSettingBool("use_original_title"),
+		AddSpecials:         xbmc.GetSettingBool("add_specials"),
 		PreReleaseUpdates:   xbmc.GetSettingBool("pre_release_updates"),
+		ShareRatioLimit:     xbmc.GetSettingInt("share_ratio_limit"),
+		SeedTimeRatioLimit:  xbmc.GetSettingInt("seed_time_ratio_limit"),
+		SeedTimeLimit:       xbmc.GetSettingInt("seed_time_limit") * 3600,
+		DisableDHT:          xbmc.GetSettingBool("disable_dht"),
 		BTListenPortMin:     xbmc.GetSettingInt("listen_port_min"),
 		BTListenPortMax:     xbmc.GetSettingInt("listen_port_max"),
 		ConnectionsLimit:    xbmc.GetSettingInt("connections_limit"),
 		SessionSave:         xbmc.GetSettingInt("session_save"),
+		Scrobble:            xbmc.GetSettingBool("trakt_scrobble"),
+		TraktUsername:       xbmc.GetSettingString("trakt_username"),
+		TraktToken:          xbmc.GetSettingString("trakt_token"),
+		TraktRefreshToken:   xbmc.GetSettingString("trakt_refresh_token"),
+		CloudHoleKey:        xbmc.GetSettingString("cloudhole_key"),
 		TMDBApiKey:          xbmc.GetSettingString("tmdb_api_key"),
 
 		SortingModeMovies:            xbmc.GetSettingInt("sorting_mode_movies"),

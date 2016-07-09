@@ -87,6 +87,10 @@ type BTConfiguration struct {
 	LimitAfterBuffering bool
 	ConnectionsLimit    int
 	SessionSave         int
+	ShareRatioLimit     int
+	SeedTimeRatioLimit  int
+	SeedTimeLimit       int
+	DisableDHT          bool
 	LowerListenPort     int
 	UpperListenPort     int
 	DownloadPath        string
@@ -175,15 +179,25 @@ func (s *BTService) configure() {
 
 	if s.config.LimitAfterBuffering == false {
 		if s.config.MaxDownloadRate > 0 {
-			s.log.Infof("Rate limiting download to %dkb/s", s.config.MaxDownloadRate / 1024)
+			s.log.Infof("Rate limiting download to %dkB/s", s.config.MaxDownloadRate / 1024)
 			settings.SetDownloadRateLimit(s.config.MaxDownloadRate)
 		}
 		if s.config.MaxUploadRate > 0 {
-			s.log.Infof("Rate limiting upload to %dkb/s", s.config.MaxUploadRate / 1024)
+			s.log.Infof("Rate limiting upload to %dkB/s", s.config.MaxUploadRate / 1024)
 			// If we have an upload rate, use the nicer bittyrant choker
 			settings.SetChokingAlgorithm(int(libtorrent.SessionSettingsBittyrantChoker))
 			settings.SetUploadRateLimit(s.config.MaxUploadRate)
 		}
+	}
+
+	if s.config.ShareRatioLimit > 0 {
+		settings.SetShareRatioLimit(float32(s.config.ShareRatioLimit))
+	}
+	if s.config.SeedTimeRatioLimit > 0 {
+		settings.SetSeedTimeRatioLimit(float32(s.config.SeedTimeRatioLimit))
+	}
+	if s.config.SeedTimeLimit > 0 {
+		settings.SetSeedTimeLimit(s.config.SeedTimeLimit)
 	}
 
 	settings.SetPeerTos(ipToSLowCost)
@@ -273,13 +287,15 @@ func (s *BTService) LoadState(f io.Reader) error {
 }
 
 func (s *BTService) startServices() {
-	s.log.Info("Starting DHT...")
-	for _, node := range dhtBootstrapNodes {
-		pair := libtorrent.NewStdPairStringInt(node, 6881)
-		defer libtorrent.DeleteStdPairStringInt(pair)
-		s.Session.AddDhtRouter(pair)
+	if s.config.DisableDHT != true {
+		s.log.Info("Starting DHT...")
+		for _, node := range dhtBootstrapNodes {
+			pair := libtorrent.NewStdPairStringInt(node, 6881)
+			defer libtorrent.DeleteStdPairStringInt(pair)
+			s.Session.AddDhtRouter(pair)
+		}
+		s.Session.StartDht()
 	}
-	s.Session.StartDht()
 
 	s.log.Info("Starting LSD...")
 	s.Session.StartLsd()
@@ -296,8 +312,10 @@ func (s *BTService) stopServices() {
 		s.dialogProgressBG.Close()
 	}
 
-	s.log.Info("Stopping DHT...")
-	s.Session.StopDht()
+	if s.config.DisableDHT != true {
+		s.log.Info("Stopping DHT...")
+		s.Session.StopDht()
+	}
 
 	s.log.Info("Stopping LSD...")
 	s.Session.StopLsd()
@@ -448,6 +466,41 @@ func (s *BTService) downloadProgress() {
 						progress: progress,
 					})
 					totalProgress += progress
+				} else {
+					finished_time := torrentStatus.GetFinishedTime()
+					if s.config.SeedTimeLimit > 0 {
+						if finished_time >= s.config.SeedTimeLimit {
+							s.log.Noticef("Seeding time limit reached, pausing %s", torrentName)
+							torrentHandle.AutoManaged(false)
+							torrentHandle.Pause(1)
+							continue
+						}
+					}
+					if s.config.SeedTimeRatioLimit > 0 {
+						timeRatio := 0
+						download_time := torrentStatus.GetActiveTime() - finished_time
+						if download_time > 1 {
+							timeRatio = finished_time * 100 / download_time
+						}
+						if timeRatio >= s.config.SeedTimeRatioLimit {
+							s.log.Noticef("Seeding time ratio reached, pausing %s", torrentName)
+							torrentHandle.AutoManaged(false)
+							torrentHandle.Pause(1)
+							continue
+						}
+					}
+					if s.config.ShareRatioLimit > 0 {
+						ratio := int64(0)
+						allTimeDownload := torrentStatus.GetAllTimeDownload()
+						if allTimeDownload > 0 {
+							ratio = torrentStatus.GetAllTimeUpload() * 100 / allTimeDownload
+						}
+						if ratio >= int64(s.config.ShareRatioLimit) {
+							s.log.Noticef("Share ratio reached, pausing %s", torrentName)
+							torrentHandle.AutoManaged(false)
+							torrentHandle.Pause(1)
+						}
+					}
 				}
 			}
 
