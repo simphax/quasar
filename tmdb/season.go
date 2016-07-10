@@ -124,7 +124,9 @@ func (season *Season) ToListItem(show *Show) *xbmc.ListItem {
 	}
 
 	// FIXME
-	item.Info.Genre = show.Genres[0].Name
+	if(len(show.Genres) > 0) {
+		item.Info.Genre = show.Genres[0].Name
+	}
 
 	return item
 }
